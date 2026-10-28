@@ -76,10 +76,20 @@ Payment is a **simulator**; no money moves. Card `4242 4242 4242 4242` succeeds,
   state-changing requests, rate limiting, helmet headers, zod input validation, parameterised SQL,
   generic error responses, services bound to 127.0.0.1, secrets only from environment variables.
 
-## Not yet verified
+## Verification status
 
-This code was written in an environment without Node.js or PostgreSQL, so **it has not been run**:
-no `npm install`, tests, build, or manual test has been executed. Run the steps above and report any failure.
+Verified on Windows with Node.js 22.22 and PostgreSQL 18:
+
+- Backend unit tests: 12 of 12 pass (`npm test` in `backend/`).
+- Frontend unit tests: 4 of 4 pass (`npm test` in `frontend/`).
+- End-to-end API checks against a real database: 23 of 23 pass (`npm run test:e2e` in `backend/`).
+  They cover catalogue, login, orders with coupon and gift points, declined and valid payments,
+  cancellation inside and outside the 48 h window, stock limits, and per-user access control.
+- Frontend production build succeeds; `npm audit` reports 0 vulnerabilities in both packages.
+- Both servers start together with `npm run dev` from the project root.
+
+Not verified: a manual click-through in a browser (layout and styling against the wireframes),
+and deployment to a cloud or OpenShift environment.
 
 ## Deployment
 
