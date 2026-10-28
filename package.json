@@ -1,0 +1,16 @@
+{
+  "name": "bookworm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Book Worm online bookstore: runs the API and the web app together",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "test": "npm test --prefix backend && npm test --prefix frontend",
+    "test:e2e": "npm run test:e2e --prefix backend",
+    "db:setup": "npm run db:setup --prefix backend",
+    "build": "npm run build --prefix frontend"
+  }
+}

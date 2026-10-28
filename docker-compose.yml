@@ -1,0 +1,21 @@
+# PostgreSQL for local development.
+# Requires `podman login registry.redhat.io` (or docker login) with a Red Hat account.
+# Variables are read from the shell or from a root-level .env file (not committed).
+services:
+  db:
+    image: registry.redhat.io/rhel9/postgresql-16:latest
+    environment:
+      POSTGRESQL_USER: ${DB_USER:-bookworm}
+      POSTGRESQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      POSTGRESQL_DATABASE: ${DB_NAME:-bookworm}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - bookworm-data:/var/lib/pgsql/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  bookworm-data:

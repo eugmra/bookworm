@@ -1,0 +1,490 @@
+openapi: 3.0.3
+info:
+  title: Book Worm API
+  version: 1.0.0
+  description: |
+    REST API for the Book Worm online bookstore.
+    All money values are integers in paise (1 INR = 100 paise).
+    Authentication uses an HttpOnly, SameSite=Strict session cookie (`bw_session`) set by login/register.
+    Guests can browse the catalogue and request checkout quotes; ordering requires a signed-in user.
+servers:
+  - url: http://127.0.0.1:4000/api
+tags:
+  - name: Auth
+  - name: Catalog
+  - name: Checkout
+  - name: Orders
+  - name: Account
+  - name: Store
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+        '503': { description: Database unavailable }
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a customer and start a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserEnvelope' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { description: Email already registered }
+        '429': { description: Too many attempts }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserEnvelope' }
+        '401': { description: Invalid email or password }
+        '429': { description: Too many attempts }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out
+      responses:
+        '204': { description: Signed out }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user, or null for a guest
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    nullable: true
+                    allOf: [{ $ref: '#/components/schemas/User' }]
+  /categories:
+    get:
+      tags: [Catalog]
+      summary: List categories
+      responses:
+        '200': { description: OK }
+  /brands:
+    get:
+      tags: [Catalog]
+      summary: List brands (publishers), optionally within a category
+      parameters:
+        - { name: category, in: query, schema: { type: string }, description: Category slug }
+      responses:
+        '200': { description: OK }
+  /filters:
+    get:
+      tags: [Catalog]
+      summary: Available languages and formats
+      responses:
+        '200': { description: OK }
+  /books:
+    get:
+      tags: [Catalog]
+      summary: Search and filter books
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: category, in: query, schema: { type: string }, description: Category slug }
+        - { name: brand, in: query, schema: { type: integer } }
+        - { name: author, in: query, schema: { type: integer } }
+        - { name: language, in: query, schema: { type: string } }
+        - { name: format, in: query, schema: { type: string, enum: [Paperback, Hardcover, eBook] } }
+        - { name: minPrice, in: query, schema: { type: integer, minimum: 0 }, description: Paise }
+        - { name: maxPrice, in: query, schema: { type: integer, minimum: 0 }, description: Paise }
+        - { name: sort, in: query, schema: { type: string, enum: [relevance, price_asc, price_desc, newest, rating], default: relevance } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 60, default: 24 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  books: { type: array, items: { $ref: '#/components/schemas/Book' } }
+                  total: { type: integer }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /books/bestsellers:
+    get:
+      tags: [Catalog]
+      summary: Bestsellers this month
+      responses:
+        '200': { $ref: '#/components/responses/BookList' }
+  /books/new:
+    get:
+      tags: [Catalog]
+      summary: New launches
+      responses:
+        '200': { $ref: '#/components/responses/BookList' }
+  /books/recommended:
+    get:
+      tags: [Catalog]
+      summary: Recommended for you (based on order history; top rated for guests)
+      responses:
+        '200': { $ref: '#/components/responses/BookList' }
+  /books/{id}:
+    get:
+      tags: [Catalog]
+      summary: Book detail with related reads, writer and reviews
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: OK }
+        '404': { description: Not found }
+  /books/{id}/reviews:
+    post:
+      tags: [Catalog]
+      summary: Create or update the signed-in user's review (max 100 characters)
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating, body]
+              properties:
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                body: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201': { description: Saved }
+        '401': { description: Authentication required }
+  /checkout/quote:
+    post:
+      tags: [Checkout]
+      summary: Price a basket (tax, delivery, coupon, gift points). Works for guests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteRequest' }
+      responses:
+        '200': { description: Quote }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { description: Insufficient stock }
+  /orders:
+    get:
+      tags: [Orders]
+      summary: Order history
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '401': { description: Authentication required }
+    post:
+      tags: [Orders]
+      summary: Create an order awaiting payment
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrderRequest' }
+      responses:
+        '201': { description: Created }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { description: Authentication required }
+        '409': { description: Insufficient stock }
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Order detail
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: OK }
+        '404': { description: Not found }
+  /orders/{id}/pay:
+    post:
+      tags: [Orders]
+      summary: Pay for an order (simulated gateway)
+      description: |
+        Card numbers are validated (Luhn, expiry, CVV) and never stored; only the last 4 digits are kept.
+        Test card numbers ending in `0002` are declined. A fully covered (zero-total) order needs no card.
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayRequest' }
+      responses:
+        '200': { description: Payment successful, order confirmed }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '402': { description: Payment declined or insufficient wallet balance }
+        '409': { description: Order not awaiting payment or stock changed }
+  /orders/{id}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancel an order within the cancellation window (48 hours after payment)
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { description: Cancelled; stock, gift points and wallet refunded }
+        '409': { description: Window closed or already cancelled }
+  /me/wishlist:
+    get:
+      tags: [Account]
+      summary: My wishlist
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/BookList' }
+  /me/wishlist/{id}:
+    put:
+      tags: [Account]
+      summary: Add a book to the wishlist
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Added }
+    delete:
+      tags: [Account]
+      summary: Remove a book from the wishlist
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Removed }
+  /me/writers:
+    get:
+      tags: [Account]
+      summary: Writers, with followed ones first
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: OK }
+  /me/writers/{id}/follow:
+    put:
+      tags: [Account]
+      summary: Follow a writer
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Following }
+    delete:
+      tags: [Account]
+      summary: Unfollow a writer
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Unfollowed }
+  /me/addresses:
+    get:
+      tags: [Account]
+      summary: Saved delivery addresses
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200': { description: OK }
+  /me/addresses/{id}:
+    delete:
+      tags: [Account]
+      summary: Delete a saved address
+      security: [{ cookieAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Deleted }
+  /store:
+    get:
+      tags: [Store]
+      summary: Store policies (tax, delivery, cancellation window, gift point value)
+      responses:
+        '200': { description: OK }
+  /store/books:
+    post:
+      tags: [Store]
+      summary: Add a book to the catalogue (admin only)
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewBook' }
+      responses:
+        '201': { description: Created }
+        '401': { description: Authentication required }
+        '403': { description: Forbidden }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: bw_session
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  responses:
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              code: { type: string }
+              details:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field: { type: string }
+                    message: { type: string }
+    BookList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              books: { type: array, items: { $ref: '#/components/schemas/Book' } }
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [customer, admin] }
+        giftPoints: { type: integer }
+        walletPaise: { type: integer }
+    UserEnvelope:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 80 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, maxLength: 128 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    Book:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        tagline: { type: string }
+        description: { type: string }
+        format: { type: string, enum: [Paperback, Hardcover, eBook] }
+        language: { type: string }
+        kind: { type: string, enum: [Fiction, Non-Fiction] }
+        pricePaise: { type: integer }
+        stock: { type: integer }
+        inStock: { type: boolean }
+        deliveryDate: { type: string, format: date, description: Tentative delivery date }
+        copiesSold: { type: integer }
+        publishedOn: { type: string, format: date }
+        cover:
+          type: object
+          properties:
+            bg: { type: string }
+            fg: { type: string }
+            accent: { type: string }
+        author: { type: object, properties: { id: { type: integer }, name: { type: string } } }
+        brand: { type: object, properties: { id: { type: integer }, name: { type: string } } }
+        category:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            slug: { type: string }
+        rating: { type: number }
+        reviewCount: { type: integer }
+    CartItem:
+      type: object
+      required: [bookId, quantity]
+      properties:
+        bookId: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 1, maximum: 10 }
+    QuoteRequest:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/CartItem' } }
+        couponCode: { type: string, maxLength: 40 }
+        pointsToUse: { type: integer, minimum: 0, default: 0 }
+    Address:
+      type: object
+      required: [firstName, lastName, line1, city, pin, state, country, email, phone]
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        line1: { type: string }
+        city: { type: string }
+        pin: { type: string }
+        state: { type: string }
+        country: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+    CreateOrderRequest:
+      allOf:
+        - $ref: '#/components/schemas/QuoteRequest'
+        - type: object
+          properties:
+            addressId: { type: integer, description: Use a saved address }
+            address: { $ref: '#/components/schemas/Address' }
+            saveAddress: { type: boolean, default: false }
+    PayRequest:
+      type: object
+      required: [method]
+      properties:
+        method: { type: string, enum: [credit_card, debit_card, upi, wallet] }
+        details:
+          type: object
+          properties:
+            cardNumber: { type: string }
+            nameOnCard: { type: string }
+            cvv: { type: string }
+            expiry: { type: string, example: 12/2030 }
+            upiId: { type: string }
+    NewBook:
+      type: object
+      required: [title, authorId, brandId, categoryId, kind, format, pricePaise, stock]
+      properties:
+        title: { type: string }
+        authorId: { type: integer }
+        brandId: { type: integer }
+        categoryId: { type: integer }
+        kind: { type: string, enum: [Fiction, Non-Fiction] }
+        tagline: { type: string }
+        description: { type: string }
+        format: { type: string, enum: [Paperback, Hardcover, eBook] }
+        language: { type: string }
+        pricePaise: { type: integer, minimum: 100 }
+        stock: { type: integer, minimum: 0 }
+        deliveryDays: { type: integer, minimum: 0, maximum: 60 }
